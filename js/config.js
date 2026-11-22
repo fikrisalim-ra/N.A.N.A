@@ -7,7 +7,7 @@ window.NANA = window.NANA || {};
 
 window.NANA.CONFIG = {
   SUPABASE_URL: 'https://oxzkawqhqptocwgtkuis.supabase.co',
-  SUPABASE_ANON_KEY: 'sb_publishable_jWw7T8YvqBrsr0iTUI6Mew_A8qXLBT6I',
+  SUPABASE_ANON_KEY: 'sb_publishable_jWw7T8YvqBrsr0iTUI6Mew_A8qXLBT6',
 
   // Nilai default saat user Discord pertama kali masuk ke dashboard
   DEFAULT_USER_SETTINGS: {
