@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>N.A.N.A — Voice Channel Monitoring & Rest Reminder</title>
+  <meta name="description" content="Dashboard N.A.N.A (Nightingale Autonomous Nursing Assistant) untuk monitoring durasi sesi Voice Channel Discord dan pengingat istirahat otomatis." />
+
+  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            discord: {
+              DEFAULT: '#5865F2',
+              hover: '#4752C4',
+              soft: 'rgba(88, 101, 242, 0.14)',
+            },
+            surface: {
+              950: '#0B0F19',
+              900: '#111827',
+              850: '#171F2E',
+              800: '#1E293B',
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/style.css" />
+
+  <!-- Supabase JS SDK v2 via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+
+<body class="bg-surface-950 text-slate-100 min-h-screen antialiased selection:bg-discord/30 selection:text-white">
+  <!-- Subtle Background Glow -->
+  <div class="pointer-events-none fixed inset-0 overflow-hidden -z-10">
+    <div class="absolute -top-40 left-1/2 -translate-x-1/2 w-[42rem] h-[22rem] rounded-full bg-discord/10 blur-[120px]"></div>
+    <div class="absolute bottom-0 right-0 w-[26rem] h-[18rem] rounded-full bg-emerald-500/5 blur-[120px]"></div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2.5 max-w-sm w-[calc(100%-2.5rem)]" aria-live="polite"></div>
+
+  <!-- =========================================================
+       1. LOADING VIEW (Ditampilkan saat cek sesi awal / OAuth)
+       ========================================================= -->
+  <section id="loading-view" class="min-h-screen flex flex-col items-center justify-center p-6">
+    <div class="flex flex-col items-center gap-4">
+      <div class="w-11 h-11 rounded-2xl bg-discord/15 border border-discord/30 flex items-center justify-center">
+        <svg class="w-5 h-5 text-discord animate-spin" viewBox="0 0 24 24" fill="none">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+          <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"></path>
+        </svg>
+      </div>
+      <p id="loading-text" class="text-sm text-slate-400">Memeriksa sesi autentikasi...</p>
+    </div>
+  </section>
+
+  <!-- =========================================================
+       2. LOGIN VIEW (Ditampilkan jika belum login)
+       ========================================================= -->
+  <section id="login-view" class="hidden min-h-screen flex items-center justify-center p-4 sm:p-6">
+    <div class="w-full max-w-md bg-surface-900/90 backdrop-blur-md border border-slate-800 rounded-2xl p-7 sm:p-8 shadow-2xl shadow-black/40 fade-in">
+      <!-- Brand Header -->
+      <div class="flex flex-col items-center text-center mb-7">
+        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-discord to-indigo-500 flex items-center justify-center shadow-lg shadow-discord/25 mb-4">
+          <!-- Heartbeat / Nursing Pulse Icon -->
+          <svg class="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+          </svg>
+        </div>
+
+        <div class="inline-flex items-center gap-2 mb-1.5">
+          <h1 class="text-2xl font-bold tracking-tight text-white">N.A.N.A</h1>
+          <span class="px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider rounded-full bg-discord/15 text-indigo-300 border border-discord/30">Beta</span>
+        </div>
+
+        <p class="text-xs font-medium text-slate-400 tracking-wide">
+          Nightingale Autonomous Nursing Assistant
+        </p>
+        <p class="mt-3 text-sm text-slate-400 leading-relaxed">
+          Pantau durasi sesi Voice Channel Discord dan atur pengingat istirahat otomatis sesuai ritme aktivitasmu.
+        </p>
+      </div>
+
+      <!-- Error Banner (jika gagal OAuth) -->
+      <div id="login-error" class="hidden mb-5 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs leading-relaxed"></div>
+
+      <!-- Login Button -->
+      <button
+        id="btn-login-discord"
+        type="button"
+        class="w-full py-3 px-4 rounded-xl bg-discord hover:bg-discord-hover active:scale-[0.99] text-white font-semibold text-sm transition-all flex items-center justify-center gap-2.5 shadow-lg shadow-discord/20 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        <!-- Discord Logo SVG -->
+        <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+        </svg>
+        <span id="btn-login-text">Login with Discord</span>
+      </button>
+
+      <!-- Footer note -->
+      <div class="mt-6 pt-5 border-t border-slate-800/80 text-center">
+        <p class="text-xs text-slate-500">
+          Autentikasi aman melalui Discord OAuth2 &amp; Supabase.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================
+       3. DASHBOARD VIEW (Ditampilkan setelah login)
+       ========================================================= -->
+  <div id="dashboard-view" class="hidden min-h-screen flex flex-col fade-in">
+    <!-- Top Navbar -->
+    <header class="sticky top-0 z-30 bg-surface-950/80 backdrop-blur-md border-b border-slate-800/80">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+        <!-- Left: Brand -->
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-discord to-indigo-500 flex items-center justify-center shrink-0 shadow-md shadow-discord/20">
+            <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="font-bold text-base tracking-tight text-white">N.A.N.A</span>
+              <span class="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded bg-discord/15 text-indigo-300 border border-discord/25">Beta</span>
+            </div>
+            <p class="text-[11px] text-slate-400 truncate hidden sm:block">Nightingale Autonomous Nursing Assistant</p>
+          </div>
+        </div>
+
+        <!-- Right: User Profile + Logout -->
+        <div class="flex items-center gap-3 sm:gap-4">
+          <div class="flex items-center gap-2.5 bg-surface-900 border border-slate-800 rounded-full py-1 pl-1.5 pr-3">
+            <img
+              id="user-avatar"
+              src=""
+              alt="Avatar pengguna"
+              class="w-7 h-7 rounded-full object-cover bg-slate-800 hidden"
+            />
+            <div
+              id="user-avatar-fallback"
+              class="w-7 h-7 rounded-full bg-discord/25 text-indigo-200 text-xs font-bold flex items-center justify-center"
+            >
+              ?
+            </div>
+            <div class="hidden sm:flex flex-col leading-tight">
+              <span id="user-name" class="text-xs font-semibold text-slate-100 max-w-[140px] truncate">Pengguna</span>
+              <span id="user-discord-id" class="text-[10px] font-mono text-slate-500">ID: -</span>
+            </div>
+          </div>
+
+          <button
+            id="btn-logout"
+            type="button"
+            class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white bg-surface-900 hover:bg-rose-500/15 border border-slate-800 hover:border-rose-500/35 transition-colors cursor-pointer"
+            title="Keluar dari akun"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            <span>Logout</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-7 sm:py-8 space-y-6">
+      <!-- Greeting & Status Banner -->
+      <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+        <div>
+          <h2 class="text-xl sm:text-2xl font-bold tracking-tight text-white">
+            Halo, <span id="greeting-name" class="text-indigo-300">Pengguna</span>
+          </h2>
+          <p class="text-sm text-slate-400 mt-1">
+            Kelola jadwal pengingat istirahat dan pantau riwayat durasi Voice Channel kamu di sini.
+          </p>
+        </div>
+        <div id="live-vc-indicator" class="hidden inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium self-start sm:self-auto">
+          <span class="relative flex h-2 w-2">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          <span>Sedang berada di Voice Channel</span>
+        </div>
+      </div>
+
+      <!-- Global Dashboard Error Banner (misal jika RLS / koneksi bermasalah) -->
+      <div id="dashboard-error" class="hidden p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-start gap-3">
+        <svg class="w-5 h-5 shrink-0 mt-0.5 text-rose-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+        <div id="dashboard-error-text" class="leading-relaxed"></div>
+      </div>
+
+      <!-- Summary Stat Cards -->
+      <section aria-label="Ringkasan Statistik" class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <!-- Card 1: Total Sesi -->
+        <div class="bg-surface-900/90 border border-slate-800 rounded-2xl p-5 flex items-start justify-between">
+          <div>
+            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Sesi VC</p>
+            <p id="stat-total-sessions" class="mt-2 text-2xl sm:text-3xl font-bold text-white tracking-tight">-</p>
+            <p class="mt-1 text-xs text-slate-500">Sesi tercatat</p>
+          </div>
+          <div class="w-10 h-10 rounded-xl bg-discord/15 text-indigo-300 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          </div>
+        </div>
+
+        <!-- Card 2: Total Durasi -->
+        <div class="bg-surface-900/90 border border-slate-800 rounded-2xl p-5 flex items-start justify-between">
+          <div>
+            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Durasi di VC</p>
+            <p id="stat-total-duration" class="mt-2 text-2xl sm:text-3xl font-bold text-white tracking-tight">-</p>
+            <p id="stat-avg-duration" class="mt-1 text-xs text-slate-500">Rata-rata: - / sesi</p>
+          </div>
+          <div class="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+          </div>
+        </div>
+
+        <!-- Card 3: Status Reminder -->
+        <div class="bg-surface-900/90 border border-slate-800 rounded-2xl p-5 flex items-start justify-between">
+          <div>
+            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Status Pengingat</p>
+            <p id="stat-reminder-status" class="mt-2 text-2xl sm:text-3xl font-bold text-white tracking-tight">-</p>
+            <p id="stat-reminder-mode" class="mt-1 text-xs text-slate-500">Mode: -</p>
+          </div>
+          <div id="stat-reminder-icon-wrap" class="w-10 h-10 rounded-xl bg-slate-800 text-slate-400 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <!-- Main Grid: Settings (Left) + Voice Sessions History (Right) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <!-- =========================================
+             LEFT COLUMN: Pengaturan Reminder (5 cols)
+             ========================================= -->
+        <section class="lg:col-span-5 bg-surface-900/90 border border-slate-800 rounded-2xl p-5 sm:p-6">
+          <div class="flex items-center justify-between gap-2 pb-4 border-b border-slate-800/80">
+            <div>
+              <h3 class="text-base font-semibold text-white">Pengaturan Reminder</h3>
+              <p class="text-xs text-slate-400 mt-0.5">Atur interval pengingat istirahat saat berada di VC.</p>
+            </div>
+          </div>
+
+          <form id="settings-form" class="mt-5 space-y-5" novalidate>
+            <!-- Toggle 1: Aktifkan Reminder -->
+            <div class="flex items-center justify-between gap-4 p-3.5 rounded-xl bg-surface-850/80 border border-slate-800">
+              <div>
+                <label for="toggle-is-active" class="text-sm font-medium text-slate-100 cursor-pointer">
+                  Aktifkan Reminder
+                </label>
+                <p class="text-xs text-slate-400 mt-0.5">
+                  N.A.N.A akan mengirim pengingat istirahat otomatis.
+                </p>
+              </div>
+              <label class="toggle-switch shrink-0">
+                <input id="toggle-is-active" type="checkbox" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <!-- Toggle 2: Gunakan Pesan AI -->
+            <div class="flex items-center justify-between gap-4 p-3.5 rounded-xl bg-surface-850/80 border border-slate-800">
+              <div>
+                <label for="toggle-ai-reminder" class="text-sm font-medium text-slate-100 cursor-pointer">
+                  Gunakan Pesan AI
+                </label>
+                <p class="text-xs text-slate-400 mt-0.5">
+                  Buat teks pengingat lebih personal menggunakan AI.
+                </p>
+              </div>
+              <label class="toggle-switch shrink-0">
+                <input id="toggle-ai-reminder" type="checkbox" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <!-- Reminder Intervals -->
+            <div id="intervals-wrapper" class="space-y-3.5 pt-1 transition-opacity">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Interval Pengingat (Menit)
+                </span>
+                <span class="text-[11px] text-slate-500">Urutan: R1 &lt; R2 &lt; R3</span>
+              </div>
+
+              <!-- Reminder 1 -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label for="input-reminder-1" class="text-xs font-medium text-slate-300">
+                    Reminder 1 <span class="text-slate-500">(Pengingat Awal)</span>
+                  </label>
+                  <span id="preview-r1" class="text-[11px] font-mono text-indigo-300">1 jam</span>
+                </div>
+                <div class="relative">
+                  <input
+                    id="input-reminder-1"
+                    type="number"
+                    min="1"
+                    step="1"
+                    required
+                    placeholder="60"
+                    class="w-full rounded-xl bg-surface-950 border border-slate-700/80 focus:border-discord focus:ring-2 focus:ring-discord/25 px-3.5 py-2.5 pr-16 text-sm text-white font-mono outline-none transition"
+                  />
+                  <span class="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 pointer-events-none">menit</span>
+                </div>
+              </div>
+
+              <!-- Reminder 2 -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label for="input-reminder-2" class="text-xs font-medium text-slate-300">
+                    Reminder 2 <span class="text-slate-500">(Pengingat Lanjutan)</span>
+                  </label>
+                  <span id="preview-r2" class="text-[11px] font-mono text-indigo-300">3 jam</span>
+                </div>
+                <div class="relative">
+                  <input
+                    id="input-reminder-2"
+                    type="number"
+                    min="2"
+                    step="1"
+                    required
+                    placeholder="180"
+                    class="w-full rounded-xl bg-surface-950 border border-slate-700/80 focus:border-discord focus:ring-2 focus:ring-discord/25 px-3.5 py-2.5 pr-16 text-sm text-white font-mono outline-none transition"
+                  />
+                  <span class="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 pointer-events-none">menit</span>
+                </div>
+              </div>
+
+              <!-- Reminder 3 -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label for="input-reminder-3" class="text-xs font-medium text-slate-300">
+                    Reminder 3 <span class="text-slate-500">(Peringatan Istirahat)</span>
+                  </label>
+                  <span id="preview-r3" class="text-[11px] font-mono text-indigo-300">5 jam</span>
+                </div>
+                <div class="relative">
+                  <input
+                    id="input-reminder-3"
+                    type="number"
+                    min="3"
+                    step="1"
+                    required
+                    placeholder="300"
+                    class="w-full rounded-xl bg-surface-950 border border-slate-700/80 focus:border-discord focus:ring-2 focus:ring-discord/25 px-3.5 py-2.5 pr-16 text-sm text-white font-mono outline-none transition"
+                  />
+                  <span class="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 pointer-events-none">menit</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Inline Validation Error -->
+            <div id="form-validation-error" class="hidden p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs leading-relaxed"></div>
+
+            <!-- Submit Button -->
+            <button
+              id="btn-save-settings"
+              type="submit"
+              class="w-full py-2.5 px-4 rounded-xl bg-discord hover:bg-discord-hover active:scale-[0.99] text-white font-semibold text-sm transition-all flex items-center justify-center gap-2 shadow-lg shadow-discord/15 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <svg id="btn-save-spinner" class="hidden w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"></path>
+              </svg>
+              <span id="btn-save-text">Simpan Pengaturan</span>
+            </button>
+          </form>
+        </section>
+
+        <!-- =========================================
+             RIGHT COLUMN: Histori Voice Channel (7 cols)
+             ========================================= -->
+        <section class="lg:col-span-7 bg-surface-900/90 border border-slate-800 rounded-2xl overflow-hidden">
+          <div class="p-5 sm:p-6 pb-4 flex items-center justify-between gap-3 border-b border-slate-800/80">
+            <div>
+              <h3 class="text-base font-semibold text-white">Histori Voice Channel</h3>
+              <p class="text-xs text-slate-400 mt-0.5">Riwayat sesi terbaru berdasarkan waktu masuk.</p>
+            </div>
+            <button
+              id="btn-refresh-sessions"
+              type="button"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-surface-850 hover:bg-slate-800 border border-slate-700/70 transition-colors cursor-pointer disabled:opacity-50"
+              title="Muat ulang data histori"
+            >
+              <svg id="refresh-icon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10" />
+                <polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          <!-- Sessions Table Wrapper -->
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="border-b border-slate-800/80 bg-surface-950/40 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  <th class="py-3 px-5">Tanggal</th>
+                  <th class="py-3 px-4">Jam Masuk</th>
+                  <th class="py-3 px-4">Jam Keluar</th>
+                  <th class="py-3 px-5 text-right">Durasi</th>
+                </tr>
+              </thead>
+              <tbody id="sessions-table-body" class="divide-y divide-slate-800/60 text-sm">
+                <!-- Diisi secara dinamis oleh js/app.js -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Empty State -->
+          <div id="sessions-empty" class="hidden py-12 px-6 text-center">
+            <div class="w-12 h-12 rounded-2xl bg-slate-800/70 text-slate-500 flex items-center justify-center mx-auto mb-3">
+              <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            </div>
+            <p class="text-sm font-medium text-slate-300">Belum ada histori sesi Voice Channel</p>
+            <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+              Masuk ke Voice Channel di server Discord yang terhubung dengan N.A.N.A untuk mulai mencatat durasi.
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800/60 py-4 mt-8">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
+        <span>N.A.N.A — Nightingale Autonomous Nursing Assistant</span>
+        <span>Beta Dashboard &bull; Powered by Supabase &amp; n8n</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Modular Vanilla JS (Urutan pemuatan penting) -->
+  <script src="js/config.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/supabaseClient.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
