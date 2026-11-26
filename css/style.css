@@ -1,11 +1,15 @@
 /* =========================================================
    N.A.N.A Custom Styles
-   Pelengkap Tailwind CSS untuk elemen interaktif & animasi
+   Pelengkap Tailwind CSS untuk elemen interaktif, modal, accordion & animasi
    ========================================================= */
 
-/* Smooth fade-in saat berpindah view */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Smooth fade-in saat berpindah view / tab */
 .fade-in {
-  animation: fadeIn 0.25s ease-out;
+  animation: fadeIn 0.24s ease-out;
 }
 
 @keyframes fadeIn {
@@ -76,6 +80,32 @@ input[type="number"]::-webkit-inner-spin-button {
 
 input[type="number"] {
   -moz-appearance: textfield;
+}
+
+/* FAQ Accordion chevron rotation */
+.faq-chevron {
+  transition: transform 0.22s ease;
+}
+
+.faq-item.is-open .faq-chevron {
+  transform: rotate(180deg);
+}
+
+/* Dashboard Navigation Tabs */
+.nav-tab {
+  color: #94a3b8; /* slate-400 */
+  border-color: transparent;
+}
+
+.nav-tab:hover {
+  color: #e2e8f0; /* slate-200 */
+  background-color: rgba(30, 41, 59, 0.55);
+}
+
+.nav-tab.is-active {
+  color: #ffffff;
+  background-color: rgba(88, 101, 242, 0.16);
+  border-color: rgba(88, 101, 242, 0.45);
 }
 
 /* Toast Notification Animation */

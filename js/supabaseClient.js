@@ -1,11 +1,12 @@
 /**
  * N.A.N.A Supabase Client & Data Service
- * Menangani autentikasi Discord OAuth dan query tabel `users` serta `voice_sessions`.
+ * Menangani autentikasi Discord OAuth, consent, pengaturan user, serta query/hapus `voice_sessions`.
  */
 window.NANA = window.NANA || {};
 
 (function initSupabaseService() {
-  const { SUPABASE_URL, SUPABASE_ANON_KEY, DEFAULT_USER_SETTINGS } = window.NANA.CONFIG;
+  const { SUPABASE_URL, SUPABASE_ANON_KEY, DEFAULT_USER_SETTINGS, CONSENT_VERSION } =
+    window.NANA.CONFIG;
 
   if (!window.supabase || typeof window.supabase.createClient !== 'function') {
     throw new Error('Supabase JS SDK gagal dimuat dari CDN.');
@@ -61,7 +62,7 @@ window.NANA = window.NANA || {};
       const user = session?.user;
       const meta = user?.user_metadata || {};
 
-      // Prioritas utama sesuai spesifikasi: provider_id
+      // Prioritas utama: provider_id
       const discordId =
         meta.provider_id ||
         meta.sub ||
@@ -84,41 +85,61 @@ window.NANA = window.NANA || {};
     },
 
     /**
-     * Ambil data pengaturan user di tabel `users`.
-     * Jika belum ada baris untuk `discord_id` tersebut, otomatis lakukan INSERT dengan nilai default.
+     * Ambil baris user dari tabel `users` berdasarkan `discord_id`.
+     * Mengembalikan `null` jika belum ada.
      */
-    async getOrCreateUserSettings(discordId) {
-      const { data: existingUser, error: fetchError } = await client
+    async getUserSettings(discordId) {
+      const { data, error } = await client
         .from('users')
         .select('*')
         .eq('discord_id', discordId)
         .maybeSingle();
 
-      if (fetchError) {
-        throw new Error(`Gagal memuat data pengguna: ${fetchError.message}`);
+      if (error) {
+        throw new Error(`Gagal memuat data pengguna: ${error.message}`);
       }
 
-      if (existingUser) {
-        return { user: existingUser, isNewUser: false };
-      }
+      return data;
+    },
 
-      // Belum ada di tabel users -> INSERT nilai default
-      const newRecord = {
+    /**
+     * Simpan persetujuan (consent) user via upsert ke tabel `users`.
+     * Jika user baru, sertakan nilai default reminder; jika user lama yang menyetujui ulang,
+     * pertahankan preferensi interval yang ada dan aktifkan kembali reminder.
+     */
+    async grantConsent(discordId, existingUser = null) {
+      const nowIso = new Date().toISOString();
+
+      const payload = {
         discord_id: discordId,
-        ...DEFAULT_USER_SETTINGS,
+        consent_status: true,
+        consented_at: nowIso,
+        consent_version: CONSENT_VERSION,
+        withdrawn_at: null,
+        is_active: true,
+        ai_reminder_enabled:
+          existingUser && typeof existingUser.ai_reminder_enabled === 'boolean'
+            ? existingUser.ai_reminder_enabled
+            : DEFAULT_USER_SETTINGS.ai_reminder_enabled,
+        reminder_1_minutes:
+          existingUser?.reminder_1_minutes ?? DEFAULT_USER_SETTINGS.reminder_1_minutes,
+        reminder_2_minutes:
+          existingUser?.reminder_2_minutes ?? DEFAULT_USER_SETTINGS.reminder_2_minutes,
+        reminder_3_minutes:
+          existingUser?.reminder_3_minutes ?? DEFAULT_USER_SETTINGS.reminder_3_minutes,
       };
 
-      const { data: insertedUser, error: insertError } = await client
+      const { data, error } = await client
         .from('users')
-        .insert(newRecord)
+        .upsert(payload, { onConflict: 'discord_id' })
         .select('*')
         .single();
 
-      if (insertError) {
-        throw new Error(`Gagal membuat profil pengguna baru: ${insertError.message}`);
+      if (error) {
+        throw new Error(`Gagal menyimpan persetujuan: ${error.message}`);
       }
 
-      return { user: insertedUser, isNewUser: true };
+      return data;
     },
 
     /**
@@ -151,7 +172,7 @@ window.NANA = window.NANA || {};
     async getVoiceSessions(discordId) {
       const { data, error } = await client
         .from('voice_sessions')
-        .select('id, discord_id, guild_id, channel_id, joined_at, left_at')
+        .select('id, discord_id, guild_id, guild_name, guild_icon_url, channel_id, joined_at, left_at')
         .eq('discord_id', discordId)
         .order('joined_at', { ascending: false });
 
@@ -160,6 +181,35 @@ window.NANA = window.NANA || {};
       }
 
       return data || [];
+    },
+
+    /**
+     * Tarik persetujuan & hapus seluruh data riwayat user:
+     * 1) DELETE seluruh baris user pada `voice_sessions`
+     * 2) UPDATE `users` (consent_status: false, is_active: false, withdrawn_at: now)
+     */
+    async withdrawConsentAndDeleteData(discordId) {
+      const { error: deleteError } = await client
+        .from('voice_sessions')
+        .delete()
+        .eq('discord_id', discordId);
+
+      if (deleteError) {
+        throw new Error(`Gagal menghapus riwayat Voice Channel: ${deleteError.message}`);
+      }
+
+      const { error: updateError } = await client
+        .from('users')
+        .update({
+          consent_status: false,
+          is_active: false,
+          withdrawn_at: new Date().toISOString(),
+        })
+        .eq('discord_id', discordId);
+
+      if (updateError) {
+        throw new Error(`Gagal memperbarui status persetujuan: ${updateError.message}`);
+      }
     },
   };
 })();

@@ -1,7 +1,6 @@
 /**
  * N.A.N.A Configuration
- * Pusat konfigurasi Supabase dan nilai default aplikasi.
- * Ubah file ini jika nanti menambahkan endpoint n8n atau config baru.
+ * Pusat konfigurasi Supabase, versi persetujuan, masa retensi, dan nilai default aplikasi.
  */
 window.NANA = window.NANA || {};
 
@@ -9,7 +8,11 @@ window.NANA.CONFIG = {
   SUPABASE_URL: 'https://oxzkawqhqptocwgtkuis.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_jWw7T8YvqBrsr0iTUI6Mew_A8qXLBT6',
 
-  // Nilai default saat user Discord pertama kali masuk ke dashboard
+  // Metadata kebijakan privasi & persetujuan (consent)
+  CONSENT_VERSION: 'v1.0',
+  DATA_RETENTION_LABEL: '1 tahun',
+
+  // Nilai default saat user Discord pertama kali menyetujui dan masuk ke dashboard
   DEFAULT_USER_SETTINGS: {
     is_active: true,
     ai_reminder_enabled: false,

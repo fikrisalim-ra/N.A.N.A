@@ -1,33 +1,69 @@
 /**
  * N.A.N.A Dashboard Application Controller
- * Mengatur tampilan, state aplikasi, form pengaturan, statistik, dan histori VC.
+ * Mengatur Landing Page, Consent Modal wajib, Dashboard 3 Tab, Chart.js, Settings, dan Privasi.
  */
 (function initNanaApp() {
-  const { API, Utils, CONFIG } = window.NANA;
+  const { API, Utils, Charts, CONFIG } = window.NANA;
 
-  // State aplikasi terpusat agar mudah dikembangkan di iterasi berikutnya
+  // State aplikasi terpusat
   const state = {
     session: null,
     profile: null,
     userSettings: null,
+    pendingExistingUser: null,
     voiceSessions: [],
+    activeTab: 'analytics',
     liveTimerId: null,
-    isDashboardLoadedForUserId: null,
+    loadedDiscordId: null,
+    isConsentModalOpen: false,
+    isWithdrawModalOpen: false,
   };
 
   // Referensi elemen DOM
   const els = {
     loadingView: document.getElementById('loading-view'),
     loadingText: document.getElementById('loading-text'),
-    loginView: document.getElementById('login-view'),
-    loginError: document.getElementById('login-error'),
-    btnLoginDiscord: document.getElementById('btn-login-discord'),
-    btnLoginText: document.getElementById('btn-login-text'),
 
+    landingView: document.getElementById('landing-view'),
+    loginError: document.getElementById('login-error'),
+    loginButtons: document.querySelectorAll('[data-discord-login]'),
+    faqItems: document.querySelectorAll('.faq-item'),
+    retentionTexts: document.querySelectorAll('[data-retention-text]'),
+
+    // Consent Modal
+    consentModal: document.getElementById('consent-modal'),
+    consentModalVersion: document.getElementById('consent-modal-version'),
+    consentUserName: document.getElementById('consent-user-name'),
+    consentUserId: document.getElementById('consent-user-id'),
+    consentCheckAge: document.getElementById('consent-check-age'),
+    consentCheckAgree: document.getElementById('consent-check-agree'),
+    consentError: document.getElementById('consent-error'),
+    btnConsentDecline: document.getElementById('btn-consent-decline'),
+    btnConsentAccept: document.getElementById('btn-consent-accept'),
+    consentAcceptSpinner: document.getElementById('consent-accept-spinner'),
+    consentAcceptText: document.getElementById('consent-accept-text'),
+
+    // Withdraw Confirmation Modal
+    withdrawModal: document.getElementById('withdraw-modal'),
+    withdrawError: document.getElementById('withdraw-error'),
+    btnOpenWithdrawModal: document.getElementById('btn-open-withdraw-modal'),
+    btnWithdrawCancel: document.getElementById('btn-withdraw-cancel'),
+    btnWithdrawConfirm: document.getElementById('btn-withdraw-confirm'),
+    withdrawConfirmSpinner: document.getElementById('withdraw-confirm-spinner'),
+    withdrawConfirmText: document.getElementById('withdraw-confirm-text'),
+
+    // Dashboard Shell & Tabs
     dashboardView: document.getElementById('dashboard-view'),
     dashboardError: document.getElementById('dashboard-error'),
     dashboardErrorText: document.getElementById('dashboard-error-text'),
+    tabButtons: document.querySelectorAll('[data-tab-target]'),
+    tabPanels: {
+      analytics: document.getElementById('tab-panel-analytics'),
+      settings: document.getElementById('tab-panel-settings'),
+      privacy: document.getElementById('tab-panel-privacy'),
+    },
 
+    // Header Profile
     userAvatar: document.getElementById('user-avatar'),
     userAvatarFallback: document.getElementById('user-avatar-fallback'),
     userName: document.getElementById('user-name'),
@@ -36,6 +72,7 @@
     liveVcIndicator: document.getElementById('live-vc-indicator'),
     btnLogout: document.getElementById('btn-logout'),
 
+    // Tab 1: Stats, Charts, Table
     statTotalSessions: document.getElementById('stat-total-sessions'),
     statTotalDuration: document.getElementById('stat-total-duration'),
     statAvgDuration: document.getElementById('stat-avg-duration'),
@@ -43,6 +80,19 @@
     statReminderMode: document.getElementById('stat-reminder-mode'),
     statReminderIconWrap: document.getElementById('stat-reminder-icon-wrap'),
 
+    weeklyTotalBadge: document.getElementById('weekly-total-badge'),
+    chartWeeklyCanvas: document.getElementById('chart-weekly-duration'),
+    chartServerCanvas: document.getElementById('chart-server-distribution'),
+    serverChartEmpty: document.getElementById('server-chart-empty'),
+    serverChartContent: document.getElementById('server-chart-content'),
+    topServersList: document.getElementById('top-servers-list'),
+
+    btnRefreshSessions: document.getElementById('btn-refresh-sessions'),
+    refreshIcon: document.getElementById('refresh-icon'),
+    sessionsTableBody: document.getElementById('sessions-table-body'),
+    sessionsEmpty: document.getElementById('sessions-empty'),
+
+    // Tab 2: Settings Form
     settingsForm: document.getElementById('settings-form'),
     toggleIsActive: document.getElementById('toggle-is-active'),
     toggleAiReminder: document.getElementById('toggle-ai-reminder'),
@@ -58,22 +108,80 @@
     btnSaveSpinner: document.getElementById('btn-save-spinner'),
     btnSaveText: document.getElementById('btn-save-text'),
 
-    btnRefreshSessions: document.getElementById('btn-refresh-sessions'),
-    refreshIcon: document.getElementById('refresh-icon'),
-    sessionsTableBody: document.getElementById('sessions-table-body'),
-    sessionsEmpty: document.getElementById('sessions-empty'),
+    // Tab 3: Privacy
+    privacyConsentStatus: document.getElementById('privacy-consent-status'),
+    privacyConsentVersion: document.getElementById('privacy-consent-version'),
+    privacyConsentedAt: document.getElementById('privacy-consented-at'),
+    privacyRetention: document.getElementById('privacy-retention'),
 
     toastContainer: document.getElementById('toast-container'),
   };
 
   /* =========================================================
-     UI Helpers (View Switching & Toast Notification)
+     UI Helpers (View Switching, Tabs, Modals, Toast)
      ========================================================= */
 
   function showView(viewName) {
     els.loadingView.classList.toggle('hidden', viewName !== 'loading');
-    els.loginView.classList.toggle('hidden', viewName !== 'login');
+    els.landingView.classList.toggle('hidden', viewName !== 'landing');
     els.dashboardView.classList.toggle('hidden', viewName !== 'dashboard');
+  }
+
+  function setActiveTab(tabName) {
+    if (!els.tabPanels[tabName]) return;
+    state.activeTab = tabName;
+
+    els.tabButtons.forEach((btn) => {
+      const isActive = btn.dataset.tabTarget === tabName;
+      btn.classList.toggle('is-active', isActive);
+      btn.setAttribute('aria-selected', String(isActive));
+    });
+
+    Object.entries(els.tabPanels).forEach(([key, panel]) => {
+      panel.classList.toggle('hidden', key !== tabName);
+    });
+
+    if (tabName === 'analytics') {
+      // Pastikan ukuran Chart.js menyesuaikan container saat tab dibuka
+      requestAnimationFrame(() => Charts.resizeAll());
+    }
+  }
+
+  function openConsentModal(profile, existingUser) {
+    state.pendingExistingUser = existingUser || null;
+    state.isConsentModalOpen = true;
+
+    els.consentModalVersion.textContent = CONFIG.CONSENT_VERSION;
+    els.consentUserName.textContent = profile.displayName;
+    els.consentUserId.textContent = profile.discordId ? `(${profile.discordId})` : '';
+    els.consentCheckAge.checked = false;
+    els.consentCheckAgree.checked = false;
+    els.btnConsentAccept.disabled = true;
+    els.consentError.classList.add('hidden');
+    els.consentError.textContent = '';
+
+    // Blokir akses ke dashboard sepenuhnya
+    els.loadingView.classList.add('hidden');
+    els.dashboardView.classList.add('hidden');
+    els.landingView.classList.add('hidden');
+    els.consentModal.classList.remove('hidden');
+  }
+
+  function closeConsentModal() {
+    state.isConsentModalOpen = false;
+    els.consentModal.classList.add('hidden');
+  }
+
+  function openWithdrawModal() {
+    state.isWithdrawModalOpen = true;
+    els.withdrawError.classList.add('hidden');
+    els.withdrawError.textContent = '';
+    els.withdrawModal.classList.remove('hidden');
+  }
+
+  function closeWithdrawModal() {
+    state.isWithdrawModalOpen = false;
+    els.withdrawModal.classList.add('hidden');
   }
 
   function showToast(message, type = 'success') {
@@ -108,7 +216,7 @@
     setTimeout(() => {
       toast.classList.add('toast-exit');
       setTimeout(() => toast.remove(), 220);
-    }, 3600);
+    }, 4000);
   }
 
   function showDashboardError(message) {
@@ -131,9 +239,25 @@
     els.formValidationError.classList.remove('hidden');
   }
 
+  function setLoginButtonsLoading(isLoading) {
+    els.loginButtons.forEach((btn) => {
+      btn.disabled = isLoading;
+      const label = btn.querySelector('[data-login-label]');
+      if (label) {
+        label.textContent = isLoading ? 'Mengarahkan ke Discord...' : 'Login with Discord';
+      }
+    });
+  }
+
   /* =========================================================
      Render Functions
      ========================================================= */
+
+  function syncRetentionLabels() {
+    els.retentionTexts.forEach((el) => {
+      el.textContent = CONFIG.DATA_RETENTION_LABEL;
+    });
+  }
 
   function renderUserProfile(profile) {
     els.userName.textContent = profile.displayName;
@@ -177,6 +301,7 @@
     updateMinutePreviews();
     updateActiveVisualState();
     renderReminderStatusCard(settings);
+    renderPrivacyInfo(settings);
   }
 
   function renderReminderStatusCard(settings) {
@@ -199,7 +324,72 @@
     }`;
   }
 
-  function renderVoiceSessionsAndStats(sessions) {
+  function renderPrivacyInfo(settings) {
+    els.privacyConsentStatus.textContent = settings.consent_status ? 'Disetujui' : 'Belum Disetujui';
+    els.privacyConsentVersion.textContent = settings.consent_version || CONFIG.CONSENT_VERSION;
+    els.privacyConsentedAt.textContent = Utils.formatDateTime(settings.consented_at);
+    els.privacyRetention.textContent = CONFIG.DATA_RETENTION_LABEL;
+  }
+
+  function renderTopServersList(servers) {
+    els.topServersList.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+
+    servers.forEach((srv, idx) => {
+      const row = document.createElement('div');
+      row.className = 'flex items-center justify-between gap-3 p-2 rounded-xl bg-surface-950/60 border border-slate-800/70';
+
+      const left = document.createElement('div');
+      left.className = 'flex items-center gap-2.5 min-w-0';
+
+      const dot = document.createElement('span');
+      dot.className = 'w-2 h-2 rounded-full shrink-0';
+      dot.style.backgroundColor = Charts.getServerColor(idx);
+
+      const avatar = Utils.createServerAvatarElement(srv.name, srv.iconUrl, 'w-7 h-7 text-[10px]');
+
+      const meta = document.createElement('div');
+      meta.className = 'min-w-0';
+
+      const nameEl = document.createElement('p');
+      nameEl.className = 'text-xs font-medium text-slate-200 truncate';
+      nameEl.textContent = srv.name;
+      nameEl.title = srv.name;
+
+      const subEl = document.createElement('p');
+      subEl.className = 'text-[10px] text-slate-500';
+      subEl.textContent = `${srv.sessionCount} sesi`;
+
+      meta.appendChild(nameEl);
+      meta.appendChild(subEl);
+
+      left.appendChild(dot);
+      left.appendChild(avatar);
+      left.appendChild(meta);
+
+      const right = document.createElement('div');
+      right.className = 'text-right shrink-0';
+
+      const durEl = document.createElement('p');
+      durEl.className = 'text-xs font-mono font-medium text-slate-200';
+      durEl.textContent = Utils.formatDurationMs(srv.durationMs);
+
+      const pctEl = document.createElement('p');
+      pctEl.className = 'text-[10px] font-mono text-slate-500';
+      pctEl.textContent = `${srv.percentage}%`;
+
+      right.appendChild(durEl);
+      right.appendChild(pctEl);
+
+      row.appendChild(left);
+      row.appendChild(right);
+      fragment.appendChild(row);
+    });
+
+    els.topServersList.appendChild(fragment);
+  }
+
+  function renderVoiceSessionsAndAnalytics(sessions, animateCharts = true) {
     const totalSessions = sessions.length;
     let totalDurationMs = 0;
     let hasActiveSession = false;
@@ -209,88 +399,127 @@
       if (!s.left_at) hasActiveSession = true;
     }
 
-    // Update Summary Cards
+    // 1. Update 4 Summary Cards
     els.statTotalSessions.textContent = totalSessions.toLocaleString('id-ID');
     els.statTotalDuration.textContent = totalSessions > 0 ? Utils.formatDurationMs(totalDurationMs) : '0m';
 
     if (totalSessions > 0) {
       const avgMs = Math.floor(totalDurationMs / totalSessions);
-      els.statAvgDuration.textContent = `Rata-rata: ${Utils.formatDurationMs(avgMs)} / sesi`;
+      els.statAvgDuration.textContent = Utils.formatDurationMs(avgMs);
     } else {
-      els.statAvgDuration.textContent = 'Rata-rata: 0m / sesi';
+      els.statAvgDuration.textContent = '0m';
     }
 
-    // Update Live VC Banner
+    // 2. Update Live VC Indicator di Header
     els.liveVcIndicator.classList.toggle('hidden', !hasActiveSession);
 
-    // Render Table Rows
+    // 3. Render Bar Chart 7 Hari Terakhir
+    const weeklyBuckets = Utils.buildLast7DaysStats(sessions);
+    const weeklyTotalMs = weeklyBuckets.reduce((sum, b) => sum + b.durationMs, 0);
+    els.weeklyTotalBadge.textContent = `Total: ${Utils.formatDurationMs(weeklyTotalMs)}`;
+    Charts.renderWeeklyBarChart(els.chartWeeklyCanvas, weeklyBuckets, animateCharts);
+
+    // 4. Render Doughnut Chart & Top Server List
+    const { servers } = Utils.buildServerStats(sessions);
+    if (servers.length === 0) {
+      els.serverChartEmpty.classList.remove('hidden');
+      els.serverChartContent.classList.add('hidden');
+    } else {
+      els.serverChartEmpty.classList.add('hidden');
+      els.serverChartContent.classList.remove('hidden');
+      Charts.renderServerDoughnutChart(els.chartServerCanvas, servers, animateCharts);
+      renderTopServersList(servers);
+    }
+
+    // 5. Render Tabel Histori Sesi
     els.sessionsTableBody.innerHTML = '';
 
     if (totalSessions === 0) {
       els.sessionsEmpty.classList.remove('hidden');
-      return;
-    }
+    } else {
+      els.sessionsEmpty.classList.add('hidden');
+      const fragment = document.createDocumentFragment();
 
-    els.sessionsEmpty.classList.add('hidden');
-    const fragment = document.createDocumentFragment();
+      for (const s of sessions) {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-800/35 transition-colors';
 
-    for (const s of sessions) {
-      const tr = document.createElement('tr');
-      tr.className = 'hover:bg-slate-800/35 transition-colors';
+        const isOngoing = !s.left_at;
+        const durationMs = Utils.getSessionDurationMs(s);
+        const serverName = Utils.getServerDisplayName(s);
 
-      const isOngoing = !s.left_at;
-      const durationMs = Utils.getSessionDurationMs(s);
+        // Kolom 1: Tanggal
+        const tdDate = document.createElement('td');
+        tdDate.className = 'py-3.5 px-5 text-slate-200 whitespace-nowrap font-medium';
+        tdDate.textContent = Utils.formatDate(s.joined_at);
 
-      // Kolom 1: Tanggal
-      const tdDate = document.createElement('td');
-      tdDate.className = 'py-3.5 px-5 text-slate-200 whitespace-nowrap font-medium';
-      tdDate.textContent = Utils.formatDate(s.joined_at);
+        // Kolom 2: Server (Ikon bulat kecil + Nama / fallback guild_id)
+        const tdServer = document.createElement('td');
+        tdServer.className = 'py-3.5 px-4 whitespace-nowrap';
+        const serverWrap = document.createElement('div');
+        serverWrap.className = 'flex items-center gap-2.5 max-w-[200px]';
 
-      // Kolom 2: Jam Masuk
-      const tdIn = document.createElement('td');
-      tdIn.className = 'py-3.5 px-4 text-slate-300 font-mono text-xs whitespace-nowrap';
-      tdIn.textContent = Utils.formatTime(s.joined_at);
+        const serverAvatar = Utils.createServerAvatarElement(
+          serverName,
+          s.guild_icon_url,
+          'w-6 h-6 text-[10px]'
+        );
+        const serverText = document.createElement('span');
+        serverText.className = 'text-xs sm:text-sm text-slate-200 truncate';
+        serverText.textContent = serverName;
+        serverText.title = serverName;
 
-      // Kolom 3: Jam Keluar / Badge "Sedang di VC"
-      const tdOut = document.createElement('td');
-      tdOut.className = 'py-3.5 px-4 whitespace-nowrap';
+        serverWrap.appendChild(serverAvatar);
+        serverWrap.appendChild(serverText);
+        tdServer.appendChild(serverWrap);
 
-      if (isOngoing) {
-        const badge = document.createElement('span');
-        badge.className =
-          'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+        // Kolom 3: Jam Masuk
+        const tdIn = document.createElement('td');
+        tdIn.className = 'py-3.5 px-4 text-slate-300 font-mono text-xs whitespace-nowrap';
+        tdIn.textContent = Utils.formatTime(s.joined_at);
 
-        const dot = document.createElement('span');
-        dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
+        // Kolom 4: Jam Keluar / Badge "Sedang di VC"
+        const tdOut = document.createElement('td');
+        tdOut.className = 'py-3.5 px-4 whitespace-nowrap';
 
-        const label = document.createElement('span');
-        label.textContent = 'Sedang di VC';
+        if (isOngoing) {
+          const badge = document.createElement('span');
+          badge.className =
+            'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
 
-        badge.appendChild(dot);
-        badge.appendChild(label);
-        tdOut.appendChild(badge);
-      } else {
-        tdOut.classList.add('text-slate-300', 'font-mono', 'text-xs');
-        tdOut.textContent = Utils.formatTime(s.left_at);
+          const dot = document.createElement('span');
+          dot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
+
+          const label = document.createElement('span');
+          label.textContent = 'Sedang di VC';
+
+          badge.appendChild(dot);
+          badge.appendChild(label);
+          tdOut.appendChild(badge);
+        } else {
+          tdOut.classList.add('text-slate-300', 'font-mono', 'text-xs');
+          tdOut.textContent = Utils.formatTime(s.left_at);
+        }
+
+        // Kolom 5: Durasi
+        const tdDur = document.createElement('td');
+        tdDur.className = `py-3.5 px-5 text-right font-mono text-xs whitespace-nowrap ${
+          isOngoing ? 'text-emerald-300 font-semibold' : 'text-slate-200'
+        }`;
+        tdDur.textContent = Utils.formatDurationMs(durationMs);
+
+        tr.appendChild(tdDate);
+        tr.appendChild(tdServer);
+        tr.appendChild(tdIn);
+        tr.appendChild(tdOut);
+        tr.appendChild(tdDur);
+        fragment.appendChild(tr);
       }
 
-      // Kolom 4: Durasi
-      const tdDur = document.createElement('td');
-      tdDur.className = `py-3.5 px-5 text-right font-mono text-xs whitespace-nowrap ${
-        isOngoing ? 'text-emerald-300 font-semibold' : 'text-slate-200'
-      }`;
-      tdDur.textContent = Utils.formatDurationMs(durationMs);
-
-      tr.appendChild(tdDate);
-      tr.appendChild(tdIn);
-      tr.appendChild(tdOut);
-      tr.appendChild(tdDur);
-      fragment.appendChild(tr);
+      els.sessionsTableBody.appendChild(fragment);
     }
 
-    els.sessionsTableBody.appendChild(fragment);
-
-    // Atur auto-update durasi lokal jika ada sesi yang sedang berjalan
+    // Auto-update durasi lokal jika user sedang berada di VC
     manageLiveDurationTimer(hasActiveSession);
   }
 
@@ -302,82 +531,106 @@
 
     if (hasActiveSession) {
       state.liveTimerId = setInterval(() => {
-        renderVoiceSessionsAndStats(state.voiceSessions);
+        renderVoiceSessionsAndAnalytics(state.voiceSessions, false);
       }, CONFIG.LIVE_DURATION_TICK_MS);
     }
   }
 
   /* =========================================================
-     Data Loading & Auth Flow
+     Auth, Consent Gate & Data Loading
      ========================================================= */
 
-  async function loadDashboardData(session) {
+  async function enterDashboardWithUser(profile, userSettings) {
+    els.loadingText.textContent = 'Memuat analitik Voice Channel...';
+    closeConsentModal();
+    showView('loading');
+    showDashboardError('');
+
+    try {
+      const sessions = await API.getVoiceSessions(profile.discordId);
+      state.userSettings = userSettings;
+      state.voiceSessions = sessions;
+      state.loadedDiscordId = profile.discordId;
+
+      renderUserProfile(profile);
+      renderSettingsForm(userSettings);
+
+      showView('dashboard');
+      setActiveTab('analytics');
+      renderVoiceSessionsAndAnalytics(sessions, true);
+    } catch (err) {
+      console.error('[N.A.N.A] Dashboard load error:', err);
+      renderUserProfile(profile);
+      renderSettingsForm(userSettings);
+      showView('dashboard');
+      setActiveTab('analytics');
+      showDashboardError(
+        `${err.message}. Pastikan RLS policy Supabase mengizinkan akses untuk pengguna terautentikasi.`
+      );
+    }
+  }
+
+  async function handleAuthenticatedSession(session) {
     const profile = API.extractDiscordProfile(session);
     state.session = session;
     state.profile = profile;
 
     if (!profile.discordId) {
-      showView('dashboard');
-      renderUserProfile(profile);
-      showDashboardError(
-        'Discord ID (provider_id) tidak ditemukan pada sesi login. Pastikan login menggunakan akun Discord yang valid.'
-      );
+      resetToLanding();
+      els.loginError.textContent =
+        'Discord ID (provider_id) tidak ditemukan pada sesi login. Pastikan login menggunakan akun Discord yang valid.';
+      els.loginError.classList.remove('hidden');
       return;
     }
 
-    // Hindari reload berulang jika user yang sama sudah dimuat
-    if (state.isDashboardLoadedForUserId === profile.discordId) {
+    // Hindari reload berulang untuk user yang sudah selesai dimuat
+    if (state.loadedDiscordId === profile.discordId && !state.isConsentModalOpen) {
       showView('dashboard');
       return;
     }
 
-    els.loadingText.textContent = 'Menyiapkan dashboard N.A.N.A...';
+    els.loadingText.textContent = 'Memeriksa status persetujuan akun...';
     showView('loading');
-    showDashboardError('');
 
     try {
-      renderUserProfile(profile);
+      const existingUser = await API.getUserSettings(profile.discordId);
 
-      // Jalankan query pengaturan user dan histori VC secara paralel
-      const [userResult, sessions] = await Promise.all([
-        API.getOrCreateUserSettings(profile.discordId),
-        API.getVoiceSessions(profile.discordId),
-      ]);
-
-      state.userSettings = userResult.user;
-      state.voiceSessions = sessions;
-      state.isDashboardLoadedForUserId = profile.discordId;
-
-      renderSettingsForm(state.userSettings);
-      renderVoiceSessionsAndStats(state.voiceSessions);
-
-      showView('dashboard');
-
-      if (userResult.isNewUser) {
-        showToast('Selamat datang! Pengaturan default N.A.N.A berhasil dibuat.', 'info');
+      // CONSENT GATE WAJIB:
+      // Jika user belum ada di tabel users ATAU consent_status bukan true, blokir dashboard
+      if (!existingUser || existingUser.consent_status !== true) {
+        openConsentModal(profile, existingUser);
+        return;
       }
+
+      await enterDashboardWithUser(profile, existingUser);
     } catch (err) {
-      console.error('[N.A.N.A] Dashboard load error:', err);
-      showView('dashboard');
-      showDashboardError(
-        `${err.message}. Pastikan tabel & RLS policy di Supabase sudah mengizinkan akses untuk pengguna terautentikasi.`
-      );
+      console.error('[N.A.N.A] Auth check error:', err);
+      resetToLanding();
+      els.loginError.textContent = `Gagal memeriksa data akun: ${err.message}`;
+      els.loginError.classList.remove('hidden');
     }
   }
 
-  function resetToLogin() {
+  function resetToLanding() {
     if (state.liveTimerId) {
       clearInterval(state.liveTimerId);
       state.liveTimerId = null;
     }
+    Charts.destroyAll();
+    closeConsentModal();
+    closeWithdrawModal();
+
     state.session = null;
     state.profile = null;
     state.userSettings = null;
+    state.pendingExistingUser = null;
     state.voiceSessions = [];
-    state.isDashboardLoadedForUserId = null;
+    state.loadedDiscordId = null;
+
+    setLoginButtonsLoading(false);
     showDashboardError('');
     showFormError('');
-    showView('login');
+    showView('landing');
   }
 
   /* =========================================================
@@ -386,8 +639,7 @@
 
   async function handleLoginClick() {
     els.loginError.classList.add('hidden');
-    els.btnLoginDiscord.disabled = true;
-    els.btnLoginText.textContent = 'Mengarahkan ke Discord...';
+    setLoginButtonsLoading(true);
 
     try {
       await API.signInWithDiscord();
@@ -395,8 +647,7 @@
       console.error('[N.A.N.A] Login error:', err);
       els.loginError.textContent = `Gagal memulai login Discord: ${err.message}`;
       els.loginError.classList.remove('hidden');
-      els.btnLoginDiscord.disabled = false;
-      els.btnLoginText.textContent = 'Login with Discord';
+      setLoginButtonsLoading(false);
     }
   }
 
@@ -404,13 +655,65 @@
     els.btnLogout.disabled = true;
     try {
       await API.signOut();
-      resetToLogin();
+      resetToLanding();
       showToast('Berhasil keluar dari akun.', 'info');
     } catch (err) {
       console.error('[N.A.N.A] Logout error:', err);
       showToast(`Gagal logout: ${err.message}`, 'error');
     } finally {
       els.btnLogout.disabled = false;
+    }
+  }
+
+  function updateConsentAcceptState() {
+    const bothChecked = els.consentCheckAge.checked && els.consentCheckAgree.checked;
+    els.btnConsentAccept.disabled = !bothChecked;
+  }
+
+  async function handleConsentAccept() {
+    if (!state.profile?.discordId) return;
+    if (!(els.consentCheckAge.checked && els.consentCheckAgree.checked)) return;
+
+    els.consentError.classList.add('hidden');
+    els.btnConsentAccept.disabled = true;
+    els.btnConsentDecline.disabled = true;
+    els.consentAcceptSpinner.classList.remove('hidden');
+    els.consentAcceptText.textContent = 'Menyimpan...';
+
+    try {
+      const savedUser = await API.grantConsent(
+        state.profile.discordId,
+        state.pendingExistingUser
+      );
+      await enterDashboardWithUser(state.profile, savedUser);
+      showToast('Persetujuan disimpan. Selamat datang di N.A.N.A!', 'success');
+    } catch (err) {
+      console.error('[N.A.N.A] Consent save error:', err);
+      els.consentError.textContent = err.message;
+      els.consentError.classList.remove('hidden');
+      els.btnConsentAccept.disabled = false;
+    } finally {
+      els.btnConsentDecline.disabled = false;
+      els.consentAcceptSpinner.classList.add('hidden');
+      els.consentAcceptText.textContent = 'Setuju & Lanjutkan';
+      updateConsentAcceptState();
+    }
+  }
+
+  async function handleConsentDecline() {
+    els.btnConsentDecline.disabled = true;
+    els.btnConsentAccept.disabled = true;
+
+    try {
+      await API.signOut();
+      resetToLanding();
+      showToast('Persetujuan ditolak. Kamu telah keluar dari akun.', 'info');
+    } catch (err) {
+      console.error('[N.A.N.A] Consent decline error:', err);
+      els.consentError.textContent = `Gagal keluar dari akun: ${err.message}`;
+      els.consentError.classList.remove('hidden');
+      els.btnConsentDecline.disabled = false;
+      updateConsentAcceptState();
     }
   }
 
@@ -423,7 +726,6 @@
       return;
     }
 
-    // Validasi input angka reminder
     const validation = Utils.validateReminderInputs(
       els.inputR1.value,
       els.inputR2.value,
@@ -435,7 +737,6 @@
       return;
     }
 
-    // Loading state pada tombol simpan
     els.btnSaveSettings.disabled = true;
     els.btnSaveSpinner.classList.remove('hidden');
     els.btnSaveText.textContent = 'Menyimpan...';
@@ -472,8 +773,8 @@
     try {
       const sessions = await API.getVoiceSessions(state.profile.discordId);
       state.voiceSessions = sessions;
-      renderVoiceSessionsAndStats(sessions);
-      showToast('Histori Voice Channel diperbarui.', 'info');
+      renderVoiceSessionsAndAnalytics(sessions, true);
+      showToast('Data analitik & histori diperbarui.', 'info');
     } catch (err) {
       console.error('[N.A.N.A] Refresh sessions error:', err);
       showToast(`Gagal memuat histori: ${err.message}`, 'error');
@@ -483,21 +784,109 @@
     }
   }
 
+  async function handleConfirmWithdraw() {
+    if (!state.profile?.discordId) return;
+
+    els.withdrawError.classList.add('hidden');
+    els.btnWithdrawConfirm.disabled = true;
+    els.btnWithdrawCancel.disabled = true;
+    els.withdrawConfirmSpinner.classList.remove('hidden');
+    els.withdrawConfirmText.textContent = 'Menghapus data...';
+
+    try {
+      await API.withdrawConsentAndDeleteData(state.profile.discordId);
+      await API.signOut();
+      resetToLanding();
+      showToast(
+        'Persetujuan berhasil ditarik dan seluruh riwayat Voice Channel kamu telah dihapus.',
+        'info'
+      );
+    } catch (err) {
+      console.error('[N.A.N.A] Withdraw error:', err);
+      els.withdrawError.textContent = err.message;
+      els.withdrawError.classList.remove('hidden');
+    } finally {
+      els.btnWithdrawConfirm.disabled = false;
+      els.btnWithdrawCancel.disabled = false;
+      els.withdrawConfirmSpinner.classList.add('hidden');
+      els.withdrawConfirmText.textContent = 'Ya, Hapus Data & Keluar';
+    }
+  }
+
   function bindEvents() {
-    els.btnLoginDiscord.addEventListener('click', handleLoginClick);
+    // Login buttons (Navbar & Hero)
+    els.loginButtons.forEach((btn) => {
+      btn.addEventListener('click', handleLoginClick);
+    });
+
+    // FAQ Accordion
+    els.faqItems.forEach((item) => {
+      const trigger = item.querySelector('.faq-trigger');
+      const content = item.querySelector('.faq-content');
+      if (!trigger || !content) return;
+
+      trigger.addEventListener('click', () => {
+        const wasOpen = item.classList.contains('is-open');
+        // Tutup FAQ lain agar rapi
+        els.faqItems.forEach((other) => {
+          other.classList.remove('is-open');
+          const otherContent = other.querySelector('.faq-content');
+          if (otherContent) otherContent.classList.add('hidden');
+        });
+        if (!wasOpen) {
+          item.classList.add('is-open');
+          content.classList.remove('hidden');
+        }
+      });
+    });
+
+    // Consent Modal checkboxes & actions (TIDAK bisa ditutup via backdrop/ESC)
+    els.consentCheckAge.addEventListener('change', updateConsentAcceptState);
+    els.consentCheckAgree.addEventListener('change', updateConsentAcceptState);
+    els.btnConsentAccept.addEventListener('click', handleConsentAccept);
+    els.btnConsentDecline.addEventListener('click', handleConsentDecline);
+
+    // Dashboard Tabs
+    els.tabButtons.forEach((btn) => {
+      btn.addEventListener('click', () => setActiveTab(btn.dataset.tabTarget));
+    });
+
+    // Dashboard Actions
     els.btnLogout.addEventListener('click', handleLogoutClick);
     els.settingsForm.addEventListener('submit', handleSaveSettings);
     els.btnRefreshSessions.addEventListener('click', handleRefreshSessions);
 
-    // Live preview konversi menit -> jam saat user mengetik
+    // Settings Form live preview
     [els.inputR1, els.inputR2, els.inputR3].forEach((input) => {
       input.addEventListener('input', () => {
         updateMinutePreviews();
         showFormError('');
       });
     });
-
     els.toggleIsActive.addEventListener('change', updateActiveVisualState);
+
+    // Withdraw Confirmation Modal
+    els.btnOpenWithdrawModal.addEventListener('click', openWithdrawModal);
+    els.btnWithdrawCancel.addEventListener('click', closeWithdrawModal);
+    els.btnWithdrawConfirm.addEventListener('click', handleConfirmWithdraw);
+    els.withdrawModal.addEventListener('click', (e) => {
+      if (e.target === els.withdrawModal && !els.btnWithdrawConfirm.disabled) {
+        closeWithdrawModal();
+      }
+    });
+
+    // Keyboard ESC handler: hanya menutup withdraw modal, TIDAK menutup consent modal
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (state.isConsentModalOpen) {
+          e.preventDefault();
+          return;
+        }
+        if (state.isWithdrawModalOpen && !els.btnWithdrawConfirm.disabled) {
+          closeWithdrawModal();
+        }
+      }
+    });
   }
 
   /* =========================================================
@@ -505,9 +894,10 @@
      ========================================================= */
 
   async function bootstrap() {
+    syncRetentionLabels();
     bindEvents();
 
-    // Cek error dari URL OAuth callback jika ada (misal user menekan Cancel di Discord)
+    // Cek error dari URL OAuth callback (misal user menekan Cancel di Discord)
     const urlParams = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const authErrorDesc = urlParams.get('error_description') || hashParams.get('error_description');
@@ -515,41 +905,41 @@
     if (authErrorDesc) {
       els.loginError.textContent = `Login Discord dibatalkan atau gagal: ${authErrorDesc}`;
       els.loginError.classList.remove('hidden');
-      // Bersihkan query/hash error dari address bar
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
     try {
       const session = await API.getSession();
       if (session) {
-        // Bersihkan parameter OAuth callback (?code= atau #access_token=) agar URL tetap rapi
         if (
           window.location.search.includes('code=') ||
           window.location.hash.includes('access_token')
         ) {
           window.history.replaceState({}, document.title, window.location.pathname);
         }
-        await loadDashboardData(session);
+        await handleAuthenticatedSession(session);
       } else {
-        resetToLogin();
+        resetToLanding();
       }
     } catch (err) {
       console.error('[N.A.N.A] Init session error:', err);
-      resetToLogin();
+      resetToLanding();
       els.loginError.textContent = `Gagal memeriksa sesi: ${err.message}`;
       els.loginError.classList.remove('hidden');
     }
 
-    // Subscribe perubahan auth (penting untuk OAuth redirect callback & logout di tab lain)
+    // Subscribe perubahan auth (OAuth redirect callback & logout di tab lain)
     API.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session) {
-        // Bersihkan token hash dari URL agar address bar rapi
-        if (window.location.hash && window.location.hash.includes('access_token')) {
+        if (
+          window.location.search.includes('code=') ||
+          window.location.hash.includes('access_token')
+        ) {
           window.history.replaceState({}, document.title, window.location.pathname);
         }
-        await loadDashboardData(session);
+        await handleAuthenticatedSession(session);
       } else if (event === 'SIGNED_OUT') {
-        resetToLogin();
+        resetToLanding();
       }
     });
   }
