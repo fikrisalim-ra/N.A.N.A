@@ -69,16 +69,19 @@ window.NANA = window.NANA || {};
         user?.identities?.find((id) => id.provider === 'discord')?.id ||
         null;
 
+      const username = meta.full_name || meta.name || 'Discord User';
+
       const displayName =
         meta.full_name ||
         meta.name ||
         meta.custom_claims?.global_name ||
-        'Pengguna Discord';
+        'Discord User';
 
       const avatarUrl = meta.avatar_url || meta.picture || '';
 
       return {
         discordId: discordId ? String(discordId) : null,
+        username,
         displayName,
         avatarUrl,
       };
@@ -107,11 +110,12 @@ window.NANA = window.NANA || {};
      * Jika user baru, sertakan nilai default reminder; jika user lama yang menyetujui ulang,
      * pertahankan preferensi interval yang ada dan aktifkan kembali reminder.
      */
-    async grantConsent(discordId, existingUser = null) {
+    async grantConsent(discordId, username, existingUser = null) {
       const nowIso = new Date().toISOString();
 
       const payload = {
         discord_id: discordId,
+        username: username || 'Discord User',
         consent_status: true,
         consented_at: nowIso,
         consent_version: CONSENT_VERSION,

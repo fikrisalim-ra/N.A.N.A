@@ -683,6 +683,7 @@
     try {
       const savedUser = await API.grantConsent(
         state.profile.discordId,
+        state.profile.username,
         state.pendingExistingUser
       );
       await enterDashboardWithUser(state.profile, savedUser);
